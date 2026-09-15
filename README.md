@@ -145,6 +145,29 @@ Optional `WRAPPER_APPLE_ID` only sets the `apple_id` label in `/me` after restor
 
 ## Building
 
+### Building the PlayReady integration fork
+
+The PlayReady HTTP endpoints used by the companion GAMDL fork are on the
+`integrate-playready-lite` branch:
+
+```bash
+git clone -b integrate-playready-lite https://github.com/worstgirlinamerica/wrapper-v2.git
+cd wrapper-v2
+```
+
+Before building, stage the Apple Music native libraries and Android system
+files required for the target architecture, as described below. Then build
+and start the service:
+
+```bash
+bash tools/extract-libs.sh --bundle path/to/local/apple-music.apk --arch x86_64
+bash tools/stage-system.sh --arch x86_64
+docker compose up --build -d
+```
+
+The companion GAMDL fork also needs its one-time `gamdl-playready` Go helper;
+building the wrapper image alone does not install that helper.
+
 ### One-time setup
 
 You need a working Docker installation. Apart from that, the entire build

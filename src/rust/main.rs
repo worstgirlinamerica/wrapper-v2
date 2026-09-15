@@ -226,34 +226,6 @@ fn handle_http_connection(mut stream: TcpStream, worker: Arc<Worker>) -> io::Res
                 .unwrap_or_default();
             proxy_apple_json(&mut stream, &worker, "webplayback", &adam_id, None)?;
         }
-        ("GET", "/lyrics") => {
-            let params = parse_query(&query);
-            let adam_id = params
-                .get("adamId")
-                .or_else(|| params.get("adam_id"))
-                .cloned()
-                .unwrap_or_default();
-            let language = params
-                .get("language")
-                .cloned()
-                .unwrap_or_else(|| "en".to_string());
-            let script = params
-                .get("script")
-                .cloned()
-                .unwrap_or_else(|| "en-Latn".to_string());
-            let storefront = params
-                .get("storefront")
-                .cloned()
-                .unwrap_or_else(|| "us".to_string());
-            proxy_apple_lyrics(
-                &mut stream,
-                &worker,
-                &adam_id,
-                &language,
-                &script,
-                &storefront,
-            )?;
-        }
         ("POST", "/license") => {
             let body_json = match parse_json_body(&body) {
                 Ok(v) => v,
@@ -396,79 +368,6 @@ fn proxy_apple_json(
                 "error":"apple_request_failed",
                 "detail": String::from_utf8_lossy(&output.stderr).trim()
             }),
-        );
-    }
-    write_response(stream, status, "application/json", response_body.as_bytes())
-}
-
-fn proxy_apple_lyrics(
-    stream: &mut TcpStream,
-    worker: &Worker,
-    adam_id: &str,
-    language: &str,
-    script: &str,
-    storefront: &str,
-) -> io::Result<()> {
-    if adam_id.is_empty() {
-        return write_json(stream, 400, json!({"error":"missing_adam_id"}));
-    }
-    let me = worker
-        .request_json(protocol::OP_ME, Value::Null)
-        .map_err(worker_io_error)?;
-    if me.http_status != 200 {
-        return write_response(stream, me.http_status, "application/json", &me.body);
-    }
-    let account: Value = serde_json::from_slice(&me.body)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-    let auth = account.get("auth").cloned().unwrap_or(Value::Null);
-    let dev_token = auth.get("dev_token").and_then(Value::as_str).unwrap_or("");
-    let music_token = auth
-        .get("music_user_token")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    if dev_token.is_empty() || music_token.is_empty() {
-        return write_json(
-            stream,
-            401,
-            json!({"error":"not_authenticated","detail":"wrapper account has no Apple web tokens"}),
-        );
-    }
-
-    let url = format!(
-        "https://amp-api.music.apple.com/v1/catalog/{}/songs/{}/syllable-lyrics?l[lyrics]={}&extend=ttmlLocalizations&l[script]={}",
-        storefront, adam_id, language, script
-    );
-    let output = Command::new("curl")
-        .args([
-            "--silent",
-            "--show-error",
-            "--location",
-            "--max-time",
-            "60",
-            "--request",
-            "GET",
-            &url,
-            "--header",
-            &format!("Authorization: Bearer {dev_token}"),
-            "--header",
-            &format!("media-user-token: {music_token}"),
-            "--header",
-            "Origin: https://music.apple.com",
-            "--header",
-            "User-Agent: Music/5.7 Android/10 model/Pixel6GR1YH",
-            "--write-out",
-            "\n%{http_code}",
-        ])
-        .output()
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("curl unavailable: {e}")))?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let (response_body, status_text) = stdout.rsplit_once('\n').unwrap_or((&stdout, "502"));
-    let status = status_text.trim().parse::<u16>().unwrap_or(502);
-    if !output.status.success() {
-        return write_json(
-            stream,
-            502,
-            json!({"error":"apple_request_failed","detail":String::from_utf8_lossy(&output.stderr).trim()}),
         );
     }
     write_response(stream, status, "application/json", response_body.as_bytes())
