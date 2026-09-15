@@ -3,7 +3,7 @@
 A clean rewrite of the Apple Music FPS (FairPlay Streaming) decryption wrapper, based on
 [`WorldObservationLog/wrapper`](https://github.com/WorldObservationLog/wrapper).
 
-This fork (`integrate-playready-lite`) adds two HTTP endpoints — `/webplayback` and `/license` — that the companion [gamdl fork](https://github.com/worstgirlinamerica/gamdl/tree/integrate-playready-lite) uses for PlayReady music-video decryption and song playback fallback. The FairPlay TCP path is unchanged.
+This fork (`playready`) adds two HTTP endpoints — `/webplayback` and `/license` — that the companion [gamdl fork](https://github.com/worstgirlinamerica/gamdl/tree/integrate-playready-lite) uses for PlayReady music-video decryption and song playback fallback. The FairPlay TCP path is unchanged.
 
 ## Development note
 
@@ -16,7 +16,7 @@ are not assumed to be correct just because they compile.
 
 A small daemon that exposes a local HTTP API for account/playback control plus
 a raw TCP port for FPS sample decryption, and gives downstream tooling (e.g.
-[`gamdl`](https://github.com/glomatico/gamdl)) a uniform interface that does
+[`gamdl`](https://github.com/worstgirlinamerica/gamdl)) a uniform interface that does
 not depend on platform or language.
 
 At runtime `/app/wrapperd` is a host-Linux Rust supervisor. It owns the public
@@ -44,7 +44,7 @@ through HTTP; clients use the raw TCP decrypt protocol on
 | `POST`   | `/login`     | Body: `{"username": "...", "password": "..."}` or `{"apple_id": "...", "password": "..."}` (synonyms). Drives Apple's `AuthenticateFlow`. Returns `200` + token snapshot, `202` if **2FA** is required (then `POST /login/2fa`), or `401` on failure.                                                                                                                              |
 | `POST`   | `/login/2fa` | Body: `{"code": "123456"}`. Continues a login waiting for HSA2.                                                                                                                                                                                                                                                                                                                    |
 | `GET`    | `/playback`  | Query string `?adam_id=<numeric store id>`. Returns `200` with a JSON object `{"songList":[...]}` containing the **whole MZ playback dispatch** Apple's `subDownload` URL bag returns (every flavor, key URI, asset URL, metadata field). CFData fields are base64; CFDate fields are ISO 8601. Needs an **authenticated** session; otherwise `401` / `503`. Apple errors -> `502`. |
-| `GET`    | `/webplayback` | Query string `?adamId=<numeric store id>`. Relays Apple's webPlayback response using the authenticated wrapper tokens. |
+| `GET`    | `/webplayback` | Query string `?adamId=<numeric store id>`. Returns Apple's web playback response for the given store ID using the authenticated session. The response contains HLS playlist URLs, per-track Widevine and PlayReady PSSHs, FairPlay key URIs, codec info, and DRM flags for both video and audio tracks — enough for a downstream client to pick a DRM path and fetch keys without holding its own Apple session. Used by the companion gamdl fork as a song playback fallback when the native `/playback` path fails. |
 | `POST`   | `/license`    | Relays a web playback license request to Apple. Body: `challenge` (base64), `uri`, `adamId`, and optional `drm-type` (`wv` for Widevine, `pr` for PlayReady; defaults to `wv`). Maps `drm-type` to the appropriate `key-system` value before forwarding. Returns Apple's license response verbatim. |
 | `DELETE` | `/login`     | Aborts an in-flight login or clears cached tokens from memory. Apple's on-disk `mpl_db` cache is unchanged.                                                                                                                                                                                                                                                                        |
 
@@ -149,11 +149,10 @@ Optional `WRAPPER_APPLE_ID` only sets the `apple_id` label in `/me` after restor
 
 ### Building the PlayReady integration fork
 
-The PlayReady HTTP endpoints used by the companion GAMDL fork are on the
-`integrate-playready-lite` branch:
+Clone the `playready` branch:
 
 ```bash
-git clone -b integrate-playready-lite https://github.com/worstgirlinamerica/wrapper-v2.git
+git clone -b playready https://github.com/worstgirlinamerica/wrapper-v2.git
 cd wrapper-v2
 ```
 
@@ -229,7 +228,7 @@ already in use.
 ### Optional sign in
 
 You do not need to sign in manually as part of the local build. Downstream tools
-such as [`gamdl`](https://github.com/glomatico/gamdl) can ask for credentials
+such as [`gamdl`](https://github.com/worstgirlinamerica/gamdl) can ask for credentials
 automatically and call `/login` / `/login/2fa` when they need an authenticated
 Apple Music session.
 
