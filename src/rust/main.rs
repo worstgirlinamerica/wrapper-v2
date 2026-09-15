@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::env;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
+use std::process::Command;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -216,6 +217,57 @@ fn handle_http_connection(mut stream: TcpStream, worker: Arc<Worker>) -> io::Res
                 worker.request_json(protocol::OP_PLAYBACK, json!({"adam_id": adam_id})),
             )?;
         }
+        ("GET", "/webplayback") => {
+            let params = parse_query(&query);
+            let adam_id = params
+                .get("adam_id")
+                .or_else(|| params.get("adamId"))
+                .cloned()
+                .unwrap_or_default();
+            proxy_apple_json(&mut stream, &worker, "webplayback", &adam_id, None)?;
+        }
+        ("GET", "/lyrics") => {
+            let params = parse_query(&query);
+            let adam_id = params
+                .get("adamId")
+                .or_else(|| params.get("adam_id"))
+                .cloned()
+                .unwrap_or_default();
+            let language = params
+                .get("language")
+                .cloned()
+                .unwrap_or_else(|| "en".to_string());
+            let script = params
+                .get("script")
+                .cloned()
+                .unwrap_or_else(|| "en-Latn".to_string());
+            let storefront = params
+                .get("storefront")
+                .cloned()
+                .unwrap_or_else(|| "us".to_string());
+            proxy_apple_lyrics(
+                &mut stream,
+                &worker,
+                &adam_id,
+                &language,
+                &script,
+                &storefront,
+            )?;
+        }
+        ("POST", "/license") => {
+            let body_json = match parse_json_body(&body) {
+                Ok(v) => v,
+                Err(e) => {
+                    write_json(
+                        &mut stream,
+                        400,
+                        json!({"error":"invalid_json","detail":e.to_string()}),
+                    )?;
+                    return Ok(());
+                }
+            };
+            proxy_apple_json(&mut stream, &worker, "license", "", Some(body_json))?;
+        }
         ("POST", "/decrypt") => {
             let _ = content_type;
             write_json(
@@ -230,6 +282,196 @@ fn handle_http_connection(mut stream: TcpStream, worker: Arc<Worker>) -> io::Res
         _ => write_json(&mut stream, 404, json!({"error":"not_found"}))?,
     }
     Ok(())
+}
+
+fn proxy_apple_json(
+    stream: &mut TcpStream,
+    worker: &Worker,
+    operation: &str,
+    adam_id: &str,
+    request_body: Option<Value>,
+) -> io::Result<()> {
+    let me = worker
+        .request_json(protocol::OP_ME, Value::Null)
+        .map_err(worker_io_error)?;
+    if me.http_status != 200 {
+        return write_response(stream, me.http_status, "application/json", &me.body);
+    }
+    let account: Value = serde_json::from_slice(&me.body)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+    let auth = account.get("auth").cloned().unwrap_or(Value::Null);
+    let dev_token = auth.get("dev_token").and_then(Value::as_str).unwrap_or("");
+    let music_token = auth
+        .get("music_user_token")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if dev_token.is_empty() || music_token.is_empty() {
+        return write_json(
+            stream,
+            401,
+            json!({
+                "error": "not_authenticated",
+                "detail": "wrapper account has no Apple web tokens"
+            }),
+        );
+    }
+
+    let (url, payload) = match operation {
+        "webplayback" => (
+            "https://play.music.apple.com/WebObjects/MZPlay.woa/wa/webPlayback",
+            json!({"salableAdamId": adam_id}),
+        ),
+        "license" => {
+            let mut payload = request_body.unwrap_or_else(|| json!({}));
+            if !payload.is_object() {
+                return write_json(stream, 400, json!({"error":"invalid_json"}));
+            }
+            let object = payload.as_object_mut().expect("object checked");
+            let drm_type = object
+                .get("drm-type")
+                .and_then(Value::as_str)
+                .unwrap_or("wv");
+            if drm_type != "wv" && drm_type != "pr" {
+                return write_json(
+                    stream,
+                    400,
+                    json!({
+                        "error":"invalid_drm_type",
+                        "detail":"drm-type must be wv or pr"
+                    }),
+                );
+            }
+            object.insert(
+                "key-system".to_string(),
+                Value::String(if drm_type == "pr" {
+                    "com.microsoft.playready".to_string()
+                } else {
+                    "com.widevine.alpha".to_string()
+                }),
+            );
+            object.insert("isLibrary".to_string(), Value::Bool(false));
+            object.insert("user-initiated".to_string(), Value::Bool(true));
+            object.remove("drm-type");
+            (
+                "https://play.itunes.apple.com/WebObjects/MZPlay.woa/wa/acquireWebPlaybackLicense",
+                payload,
+            )
+        }
+        _ => return write_json(stream, 500, json!({"error":"unknown_operation"})),
+    };
+
+    let payload_text = serde_json::to_string(&payload)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+    let output = Command::new("curl")
+        .args([
+            "--silent",
+            "--show-error",
+            "--location",
+            "--max-time",
+            "60",
+            "--request",
+            "POST",
+            url,
+            "--header",
+            &format!("Authorization: Bearer {dev_token}"),
+            "--header",
+            &format!("X-Apple-Music-User-Token: {music_token}"),
+            "--header",
+            "Content-Type: application/json",
+            "--data",
+            &payload_text,
+            "--write-out",
+            "\n%{http_code}",
+        ])
+        .output()
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("curl unavailable: {e}")))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let (response_body, status_text) = stdout.rsplit_once('\n').unwrap_or((&stdout, "502"));
+    let status = status_text.trim().parse::<u16>().unwrap_or(502);
+    if !output.status.success() {
+        return write_json(
+            stream,
+            502,
+            json!({
+                "error":"apple_request_failed",
+                "detail": String::from_utf8_lossy(&output.stderr).trim()
+            }),
+        );
+    }
+    write_response(stream, status, "application/json", response_body.as_bytes())
+}
+
+fn proxy_apple_lyrics(
+    stream: &mut TcpStream,
+    worker: &Worker,
+    adam_id: &str,
+    language: &str,
+    script: &str,
+    storefront: &str,
+) -> io::Result<()> {
+    if adam_id.is_empty() {
+        return write_json(stream, 400, json!({"error":"missing_adam_id"}));
+    }
+    let me = worker
+        .request_json(protocol::OP_ME, Value::Null)
+        .map_err(worker_io_error)?;
+    if me.http_status != 200 {
+        return write_response(stream, me.http_status, "application/json", &me.body);
+    }
+    let account: Value = serde_json::from_slice(&me.body)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+    let auth = account.get("auth").cloned().unwrap_or(Value::Null);
+    let dev_token = auth.get("dev_token").and_then(Value::as_str).unwrap_or("");
+    let music_token = auth
+        .get("music_user_token")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if dev_token.is_empty() || music_token.is_empty() {
+        return write_json(
+            stream,
+            401,
+            json!({"error":"not_authenticated","detail":"wrapper account has no Apple web tokens"}),
+        );
+    }
+
+    let url = format!(
+        "https://amp-api.music.apple.com/v1/catalog/{}/songs/{}/syllable-lyrics?l[lyrics]={}&extend=ttmlLocalizations&l[script]={}",
+        storefront, adam_id, language, script
+    );
+    let output = Command::new("curl")
+        .args([
+            "--silent",
+            "--show-error",
+            "--location",
+            "--max-time",
+            "60",
+            "--request",
+            "GET",
+            &url,
+            "--header",
+            &format!("Authorization: Bearer {dev_token}"),
+            "--header",
+            &format!("media-user-token: {music_token}"),
+            "--header",
+            "Origin: https://music.apple.com",
+            "--header",
+            "User-Agent: Music/5.7 Android/10 model/Pixel6GR1YH",
+            "--write-out",
+            "\n%{http_code}",
+        ])
+        .output()
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("curl unavailable: {e}")))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let (response_body, status_text) = stdout.rsplit_once('\n').unwrap_or((&stdout, "502"));
+    let status = status_text.trim().parse::<u16>().unwrap_or(502);
+    if !output.status.success() {
+        return write_json(
+            stream,
+            502,
+            json!({"error":"apple_request_failed","detail":String::from_utf8_lossy(&output.stderr).trim()}),
+        );
+    }
+    write_response(stream, status, "application/json", response_body.as_bytes())
 }
 
 fn split_target(target: &str) -> (String, String) {

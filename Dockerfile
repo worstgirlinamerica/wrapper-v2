@@ -104,6 +104,10 @@ RUN if [[ "$TARGET_ARCH" == "arm64-v8a" ]]; then \
 # -----------------------------------------------------------------------------
 FROM --platform=${RUNTIME_PLATFORM} debian:13.2
 
+# The supervisor uses curl for the combined wrapper's webPlayback/license relay.
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY --from=build /app/wrapper        /app/wrapper
