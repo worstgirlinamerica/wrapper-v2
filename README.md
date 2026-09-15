@@ -3,6 +3,8 @@
 A clean rewrite of the Apple Music FPS (FairPlay Streaming) decryption wrapper, based on
 [`WorldObservationLog/wrapper`](https://github.com/WorldObservationLog/wrapper).
 
+This fork (`integrate-playready-lite`) adds two HTTP endpoints — `/webplayback` and `/license` — that the companion [gamdl fork](https://github.com/worstgirlinamerica/gamdl/tree/integrate-playready-lite) uses for PlayReady music-video decryption and song playback fallback. The FairPlay TCP path is unchanged.
+
 ## Development note
 
 This project has been developed with heavy AI assistance. The code should be
@@ -43,7 +45,7 @@ through HTTP; clients use the raw TCP decrypt protocol on
 | `POST`   | `/login/2fa` | Body: `{"code": "123456"}`. Continues a login waiting for HSA2.                                                                                                                                                                                                                                                                                                                    |
 | `GET`    | `/playback`  | Query string `?adam_id=<numeric store id>`. Returns `200` with a JSON object `{"songList":[...]}` containing the **whole MZ playback dispatch** Apple's `subDownload` URL bag returns (every flavor, key URI, asset URL, metadata field). CFData fields are base64; CFDate fields are ISO 8601. Needs an **authenticated** session; otherwise `401` / `503`. Apple errors -> `502`. |
 | `GET`    | `/webplayback` | Query string `?adamId=<numeric store id>`. Relays Apple's webPlayback response using the authenticated wrapper tokens. |
-| `POST`   | `/license`    | Relays Apple's web playback license request. Accepts `challenge`, `uri`, `adamId`, and optional `drm-type` (`wv` or `pr`). |
+| `POST`   | `/license`    | Relays a web playback license request to Apple. Body: `challenge` (base64), `uri`, `adamId`, and optional `drm-type` (`wv` for Widevine, `pr` for PlayReady; defaults to `wv`). Maps `drm-type` to the appropriate `key-system` value before forwarding. Returns Apple's license response verbatim. |
 | `DELETE` | `/login`     | Aborts an in-flight login or clears cached tokens from memory. Apple's on-disk `mpl_db` cache is unchanged.                                                                                                                                                                                                                                                                        |
 
 ## TCP Decrypt API
