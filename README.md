@@ -1,15 +1,14 @@
 # wrappr
 
-A clean rewrite of the Apple Music FPS (FairPlay Streaming) decryption wrapper, based on
-[`WorldObservationLog/wrapper`](https://github.com/WorldObservationLog/wrapper).
+A fork of the Apple Music FPS (FairPlay Streaming) decryption wrapper, based on
+[`glomatico/wrapper-v2`](https://github.com/glomatico/wrapper-v2), which adds two HTTP endpoints — `/webplayback` and `/license`.
 
-This fork (`playready`) adds two HTTP endpoints — `/webplayback` and `/license` — that the companion [gamdl fork](https://github.com/worstgirlinamerica/gamdl/tree/integrate-playready-lite) uses for PlayReady-based decryption.
+The companion [gamdl-pr](https://github.com/worstgirlinamerica/gamdl/tree/playready) uses ```wrappr``` for PlayReady-based decryption.
 
 ## Development note
 
-This project has been developed with heavy AI assistance. The code should be
-treated as research-grade and reviewed carefully, especially around native ABI
-calls, FPS state handling, and experimental endpoints. AI-generated changes
+This project has been forked and developed with AI assistance. The code should be
+treated as research-grade and reviewed carefully, especially in the case that [Troubleshooting](#Troubleshooting) is unsuccessful. AI-generated changes
 are not assumed to be correct just because they compile.
 
 ---
