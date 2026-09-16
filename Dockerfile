@@ -1,4 +1,4 @@
-# wrapper-v2 image.
+# wrappr image.
 #
 # This Dockerfile assumes that rootfs/system/lib64/ has already been populated
 # by the host (or in CI) for the same TARGET_ARCH. The image does not download
@@ -14,7 +14,7 @@
 #
 # Example:
 #   docker build --build-arg TARGET_ARCH=arm64-v8a \
-#     --build-arg RUNTIME_PLATFORM=linux/arm64 -t wrapper-v2:arm64 .
+#     --build-arg RUNTIME_PLATFORM=linux/arm64 -t wrappr:arm64 .
 
 ARG RUNTIME_PLATFORM=linux/amd64
 # Kept for docker-compose compatibility; the compile stage ignores this.
@@ -93,10 +93,10 @@ RUN if [[ "$TARGET_ARCH" == "arm64-v8a" ]]; then \
       mkdir -p .cargo && \
       printf '[target.aarch64-unknown-linux-gnu]\nlinker = "aarch64-linux-gnu-gcc"\n' > .cargo/config.toml && \
       cargo build --release --target aarch64-unknown-linux-gnu && \
-      cp target/aarch64-unknown-linux-gnu/release/wrapperd /app/wrapperd; \
+      cp target/aarch64-unknown-linux-gnu/release/wrapperd /app/wrappr; \
     else \
       cargo build --release && \
-      cp target/release/wrapperd /app/wrapperd; \
+      cp target/release/wrapperd /app/wrappr; \
     fi
 
 # -----------------------------------------------------------------------------
@@ -111,7 +111,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 WORKDIR /app
 
 COPY --from=build /app/wrapper        /app/wrapper
-COPY --from=build /app/wrapperd       /app/wrapperd
+COPY --from=build /app/wrappr         /app/wrappr
 COPY --from=build /app/rootfs         /app/rootfs
 
 # Apple's libcurl inside the chroot needs CA certificates for SSL verification.
@@ -121,4 +121,4 @@ COPY --from=build /etc/ssl/certs/ca-certificates.crt /app/rootfs/etc/ssl/certs/c
 
 EXPOSE 80 10020
 
-ENTRYPOINT ["/app/wrapperd"]
+ENTRYPOINT ["/app/wrappr"]
