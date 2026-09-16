@@ -1,9 +1,9 @@
-# wrapper-v2
+# wrappr
 
 A clean rewrite of the Apple Music FPS (FairPlay Streaming) decryption wrapper, based on
 [`WorldObservationLog/wrapper`](https://github.com/WorldObservationLog/wrapper).
 
-This fork (`playready`) adds two HTTP endpoints — `/webplayback` and `/license` — that the companion [gamdl fork](https://github.com/worstgirlinamerica/gamdl/tree/integrate-playready-lite) uses for PlayReady music-video decryption and song playback fallback. The FairPlay TCP path is unchanged.
+This fork (`playready`) adds two HTTP endpoints — `/webplayback` and `/license` — that the companion [gamdl fork](https://github.com/worstgirlinamerica/gamdl/tree/integrate-playready-lite) uses[...]
 
 ## Development note
 
@@ -19,7 +19,7 @@ a raw TCP port for FPS sample decryption, and gives downstream tooling (e.g.
 [`gamdl`](https://github.com/worstgirlinamerica/gamdl)) a uniform interface that does
 not depend on platform or language.
 
-At runtime `/app/wrapperd` is a host-Linux Rust supervisor. It owns the public
+At runtime `/app/wrappr` is a host-Linux Rust supervisor. It owns the public
 HTTP port, owns the raw decrypt TCP port, and starts `/app/wrapper`, the small
 host chroot launcher. The launcher execs `/system/bin/main`, an Android/NDK C++
 IPC worker inside the Linux chroot. Only that worker loads Apple Music's Android
@@ -37,21 +37,21 @@ Most endpoints accept and return `application/json`. Decryption is not exposed
 through HTTP; clients use the raw TCP decrypt protocol on
 `${WRAPPER_DECRYPT_PORT:-10020}`.
 
-| Method   | Path         | Description                                                                                                                                                                                                                                                                                                                                                                        |
-| -------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`    | `/health`    | Liveness probe. `{status, version, runtime}` — `runtime.playback_ready` is true when FPS decrypt is available.                                                                                                                                                                                                                                                                     |
-| `GET`    | `/me`        | `{version, runtime, auth}` — same runtime flags as `/health`.                                                                                                                                                                                                                                                                                                                      |
-| `POST`   | `/login`     | Body: `{"username": "...", "password": "..."}` or `{"apple_id": "...", "password": "..."}` (synonyms). Drives Apple's `AuthenticateFlow`. Returns `200` + token snapshot, `202` if **2FA** is required (then `POST /login/2fa`), or `401` on failure.                                                                                                                              |
-| `POST`   | `/login/2fa` | Body: `{"code": "123456"}`. Continues a login waiting for HSA2.                                                                                                                                                                                                                                                                                                                    |
-| `GET`    | `/playback`  | Query string `?adam_id=<numeric store id>`. Returns `200` with a JSON object `{"songList":[...]}` containing the **whole MZ playback dispatch** Apple's `subDownload` URL bag returns (every flavor, key URI, asset URL, metadata field). CFData fields are base64; CFDate fields are ISO 8601. Needs an **authenticated** session; otherwise `401` / `503`. Apple errors -> `502`. |
-| `GET`    | `/webplayback` | Query string `?adamId=<numeric store id>`. Returns Apple's web playback response for the given store ID using the authenticated session. The response contains HLS playlist URLs, per-track Widevine and PlayReady PSSHs, FairPlay key URIs, codec info, and DRM flags for both video and audio tracks — enough for a downstream client to pick a DRM path and fetch keys without holding its own Apple session. Used by the companion gamdl fork as a song playback fallback when the native `/playback` path fails. |
-| `POST`   | `/license`    | Relays a web playback license request to Apple. Body: `challenge` (base64), `uri`, `adamId`, and optional `drm-type` (`wv` for Widevine, `pr` for PlayReady; defaults to `wv`). Maps `drm-type` to the appropriate `key-system` value before forwarding. Returns Apple's license response verbatim. |
-| `DELETE` | `/login`     | Aborts an in-flight login or clears cached tokens from memory. Apple's on-disk `mpl_db` cache is unchanged.                                                                                                                                                                                                                                                                        |
+| Method   | Path         | Description                                                                                                                                                             [...]
+| -------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------[...]
+| `GET`    | `/health`    | Liveness probe. `{status, version, runtime}` — `runtime.playback_ready` is true when FPS decrypt is available.                                                        [...]
+| `GET`    | `/me`        | `{version, runtime, auth}` — same runtime flags as `/health`.                                                                                                         [...]
+| `POST`   | `/login`     | Body: `{"username": "...", "password": "..."}` or `{"apple_id": "...", "password": "..."}` (synonyms). Drives Apple's `AuthenticateFlow`. Returns `200` + token snapshot[...]
+| `POST`   | `/login/2fa` | Body: `{"code": "123456"}`. Continues a login waiting for HSA2.                                                                                                         [...]
+| `GET`    | `/playback`  | Query string `?adam_id=<numeric store id>`. Returns `200` with a JSON object `{"songList":[...]}` containing the **whole MZ playback dispatch** Apple's `subDownload` UR[...]
+| `GET`    | `/webplayback` | Query string `?adamId=<numeric store id>`. Returns Apple's web playback response for the given store ID using the authenticated session. The response contains HLS pla[...]
+| `POST`   | `/license`    | Relays a web playback license request to Apple. Body: `challenge` (base64), `uri`, `adamId`, and optional `drm-type` (`wv` for Widevine, `pr` for PlayReady; defaults t[...]
+| `DELETE` | `/login`     | Aborts an in-flight login or clears cached tokens from memory. Apple's on-disk `mpl_db` cache is unchanged.                                                             [...]
 
 ## TCP Decrypt API
 
 The decrypt listener defaults to `0.0.0.0:10020`. The Compose file maps this as
-`${DECRYPT_PORT:-10020}:10020`. This branch uses wrapper-v2's versioned batch
+`${DECRYPT_PORT:-10020}:10020`. This branch uses wrappr's versioned batch
 protocol; it is not wire-compatible with the original wrapper sample stream.
 
 All integers are big-endian. Request and response frames share this envelope:
@@ -152,8 +152,8 @@ Optional `WRAPPER_APPLE_ID` only sets the `apple_id` label in `/me` after restor
 Clone the `playready` branch:
 
 ```bash
-git clone -b playready https://github.com/worstgirlinamerica/wrapper-v2.git
-cd wrapper-v2
+git clone -b playready https://github.com/worstgirlinamerica/wrappr.git
+cd wrappr
 ```
 
 Before building, stage the Apple Music native libraries and Android system
@@ -167,7 +167,7 @@ docker compose up --build -d
 ```
 
 The companion GAMDL fork also needs its one-time `gamdl-playready` Go helper;
-building the wrapper image alone does not install that helper.
+building the wrappr image alone does not install that helper.
 
 ### One-time setup
 

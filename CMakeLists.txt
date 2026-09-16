@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-# wrapper-v2 builds two binaries:
+# wrappr builds two binaries:
 #   wrapper  - native-Linux chroot launcher (built with the host toolchain)
 #   main     - the daemon, cross-compiled with the Android NDK so that it can
 #              be exec'd inside a chroot whose dynamic loader is Android's
@@ -19,7 +19,7 @@ cmake_minimum_required(VERSION 3.22)
 # Required input:
 #   ANDROID_NDK_HOME or NDK_PATH must point at a usable NDK r23b install.
 
-project(wrapper-v2 LANGUAGES C CXX)
+project(wrappr LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
@@ -122,7 +122,7 @@ endif()
 # -----------------------------------------------------------------------------
 # Diagnostics
 # -----------------------------------------------------------------------------
-message(STATUS "wrapper-v2:")
+message(STATUS "wrappr:")
 message(STATUS "  TARGET_ARCH         = ${TARGET_ARCH}")
 message(STATUS "  WRAPPER_BUILD_DAEMON= ${WRAPPER_BUILD_DAEMON}")
 if(WRAPPER_BUILD_DAEMON)
