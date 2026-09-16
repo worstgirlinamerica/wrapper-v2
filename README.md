@@ -3,7 +3,7 @@
 A clean rewrite of the Apple Music FPS (FairPlay Streaming) decryption wrapper, based on
 [`WorldObservationLog/wrapper`](https://github.com/WorldObservationLog/wrapper).
 
-This fork (`playready`) adds two HTTP endpoints — `/webplayback` and `/license` — that the companion [gamdl fork](https://github.com/worstgirlinamerica/gamdl/tree/integrate-playready-lite) uses[...]
+This fork (`playready`) adds two HTTP endpoints — `/webplayback` and `/license` — that the companion [gamdl fork](https://github.com/worstgirlinamerica/gamdl/tree/integrate-playready-lite) uses for PlayReady-based decryption.
 
 ## Development note
 
@@ -11,6 +11,114 @@ This project has been developed with heavy AI assistance. The code should be
 treated as research-grade and reviewed carefully, especially around native ABI
 calls, FPS state handling, and experimental endpoints. AI-generated changes
 are not assumed to be correct just because they compile.
+
+---
+
+## Prerequisites
+
+Before you do anything, make sure you have:
+
+- **Docker** — how you get it depends on your platform (see below)
+- **An Apple Music for Android APK or APKM** — version **3.6.0-beta build 1109**
+  is the tested version. You need to source this yourself legally (e.g. from your
+  own device via `adb pull`, or from an APK mirror you trust). This repo does
+  not host or link to Apple binaries.
+- **Git** — to clone this repo
+
+That's it. The build itself runs entirely inside Docker — no Rust, Go, NDK, or C++ toolchain needed on your machine.
+
+---
+
+## Quick Start
+
+Pick your platform:
+
+### macOS (Intel or Apple Silicon)
+
+macOS doesn't ship Docker. The easiest path is **Colima** (free, terminal-based) or **Docker Desktop** (GUI, free for personal use).
+
+**Option A — Colima (recommended, lighter weight):**
+
+```bash
+# Install Homebrew first if you don't have it: https://brew.sh
+brew install colima docker docker-compose
+colima start --disk 20
+```
+
+**Option B — Docker Desktop:**
+
+Download and install from [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/). Start it from your Applications folder before continuing.
+
+---
+
+Once Docker is running, clone and build:
+
+```bash
+git clone -b playready https://github.com/worstgirlinamerica/wrappr.git
+cd wrappr
+```
+
+Stage the Android system binaries (committed to the repo, just needs copying into place):
+
+```bash
+bash tools/stage-system.sh --arch x86_64
+```
+
+> **Apple Silicon Mac?** Use `--arch arm64-v8a` instead. See the [arm64 section](#arm64-v8a-image-apple-silicon--aarch64-linux) below.
+
+Extract your Apple Music APK libraries into the build (replace the path with wherever your APK is):
+
+```bash
+bash tools/extract-libs.sh --bundle /path/to/apple-music.apk --arch x86_64
+```
+
+Build and start:
+
+```bash
+docker compose up --build -d
+```
+
+Verify it's running:
+
+```bash
+curl http://127.0.0.1/health
+curl http://127.0.0.1/me
+```
+
+A `"status":"ok"` and `"playback_ready":true` in the responses means you're good.
+
+---
+
+### Linux (x86_64)
+
+Install Docker via your distro's package manager or from [docs.docker.com/engine/install](https://docs.docker.com/engine/install/). Then:
+
+```bash
+git clone -b playready https://github.com/worstgirlinamerica/wrappr.git
+cd wrappr
+bash tools/stage-system.sh --arch x86_64
+bash tools/extract-libs.sh --bundle /path/to/apple-music.apk --arch x86_64
+docker compose up --build -d
+```
+
+Verify:
+
+```bash
+curl http://127.0.0.1/health
+curl http://127.0.0.1/me
+```
+
+---
+
+### Windows
+
+Windows isn't directly supported, but you can run this inside **WSL 2** (Windows Subsystem for Linux) with Docker Desktop's WSL integration enabled.
+
+1. Install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/) and enable WSL 2 backend in Settings.
+2. Open a WSL 2 terminal (Ubuntu recommended).
+3. Follow the Linux steps above inside that terminal.
+
+---
 
 ## What it is
 
@@ -31,22 +139,26 @@ The daemon ships _no_ Apple code. Apple Music native libraries must be supplied
 by the person building the image and staged into `rootfs/system/lib64/`; the
 expected `.so` SHA-256 digests are pinned in `LIBS_VERSION.json`.
 
+---
+
 ## HTTP API
 
 Most endpoints accept and return `application/json`. Decryption is not exposed
 through HTTP; clients use the raw TCP decrypt protocol on
 `${WRAPPER_DECRYPT_PORT:-10020}`.
 
-| Method   | Path         | Description                                                                                                                                                             [...]
-| -------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------[...]
-| `GET`    | `/health`    | Liveness probe. `{status, version, runtime}` — `runtime.playback_ready` is true when FPS decrypt is available.                                                        [...]
-| `GET`    | `/me`        | `{version, runtime, auth}` — same runtime flags as `/health`.                                                                                                         [...]
-| `POST`   | `/login`     | Body: `{"username": "...", "password": "..."}` or `{"apple_id": "...", "password": "..."}` (synonyms). Drives Apple's `AuthenticateFlow`. Returns `200` + token snapshot[...]
-| `POST`   | `/login/2fa` | Body: `{"code": "123456"}`. Continues a login waiting for HSA2.                                                                                                         [...]
-| `GET`    | `/playback`  | Query string `?adam_id=<numeric store id>`. Returns `200` with a JSON object `{"songList":[...]}` containing the **whole MZ playback dispatch** Apple's `subDownload` UR[...]
-| `GET`    | `/webplayback` | Query string `?adamId=<numeric store id>`. Returns Apple's web playback response for the given store ID using the authenticated session. The response contains HLS pla[...]
-| `POST`   | `/license`    | Relays a web playback license request to Apple. Body: `challenge` (base64), `uri`, `adamId`, and optional `drm-type` (`wv` for Widevine, `pr` for PlayReady; defaults t[...]
-| `DELETE` | `/login`     | Aborts an in-flight login or clears cached tokens from memory. Apple's on-disk `mpl_db` cache is unchanged.                                                             [...]
+| Method   | Path           | Description                                                                                                                                                                                  |
+| -------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/health`      | Liveness probe. `{status, version, runtime}` — `runtime.playback_ready` is true when FPS decrypt is available.                                                                             |
+| `GET`    | `/me`          | `{version, runtime, auth}` — same runtime flags as `/health`.                                                                                                                               |
+| `POST`   | `/login`       | Body: `{"username": "...", "password": "..."}` or `{"apple_id": "...", "password": "..."}` (synonyms). Drives Apple's `AuthenticateFlow`. Returns `200` + token snapshot or `202` for 2FA. |
+| `POST`   | `/login/2fa`   | Body: `{"code": "123456"}`. Continues a login waiting for HSA2.                                                                                                                             |
+| `GET`    | `/playback`    | Query string `?adam_id=<numeric store id>`. Returns `200` with `{"songList":[...]}` containing the whole MZ playback dispatch Apple's `subDownload` URL returns.                            |
+| `GET`    | `/webplayback` | Query string `?adamId=<numeric store id>`. Returns Apple's web playback response for the given store ID using the authenticated session. The response contains HLS playlist URLs.            |
+| `POST`   | `/license`     | Relays a web playback license request to Apple. Body: `challenge` (base64), `uri`, `adamId`, and optional `drm-type` (`wv` for Widevine, `pr` for PlayReady; defaults to `pr`).             |
+| `DELETE` | `/login`       | Aborts an in-flight login or clears cached tokens from memory. Apple's on-disk `mpl_db` cache is unchanged.                                                                                 |
+
+---
 
 ## TCP Decrypt API
 
@@ -106,6 +218,8 @@ disk. On each process start the daemon tries **session restore** (default
 `POST /login` when the volume is new, restore fails, or you need to re-auth.
 Optional `WRAPPER_APPLE_ID` only sets the `apple_id` label in `/me` after restore.
 
+---
+
 ## Layout
 
 ```
@@ -145,29 +259,9 @@ Optional `WRAPPER_APPLE_ID` only sets the `apple_id` label in `/me` after restor
             └── lib64/*.so
 ```
 
+---
+
 ## Building
-
-### Building the PlayReady integration fork
-
-Clone the `playready` branch:
-
-```bash
-git clone -b playready https://github.com/worstgirlinamerica/wrappr.git
-cd wrappr
-```
-
-Before building, stage the Apple Music native libraries and Android system
-files required for the target architecture, as described below. Then build
-and start the service:
-
-```bash
-bash tools/extract-libs.sh --bundle path/to/local/apple-music.apk --arch x86_64
-bash tools/stage-system.sh --arch x86_64
-docker compose up --build -d
-```
-
-The companion GAMDL fork also needs its one-time `gamdl-playready` Go helper;
-building the wrappr image alone does not install that helper.
 
 ### One-time setup
 
@@ -336,6 +430,90 @@ TCP decrypt listener accepts connections.
 
 Pull requests opened from forks skip the build job because they cannot read the
 secret.
+
+---
+
+## Troubleshooting
+
+### `curl: (7) Failed to connect to 127.0.0.1 port 80`
+
+The container started but its ports aren't exposed to your host. Check:
+
+```bash
+docker ps
+```
+
+The `PORTS` column should show `0.0.0.0:80->80/tcp`. If it's blank:
+
+- **Colima users:** The port forwarding sometimes doesn't take on first start after a fresh `colima start`. Stop and remove the container, then start it again:
+
+  ```bash
+  docker stop wrappr && docker rm wrappr
+  docker compose up -d
+  docker ps
+  ```
+
+- **Port 80 already in use:** Another process or container has port 80. Either stop that, or override the port:
+
+  ```bash
+  HTTP_PORT=8080 docker compose up -d
+  curl http://127.0.0.1:8080/health
+  ```
+
+- **Old container still registered:** Run `docker ps -a` to check for stopped containers still holding the port, and `docker rm <name>` to remove them.
+
+### `auth: cached-session restore found Apple session files but token harvest failed`
+
+This shows up in `docker logs wrappr` and just means the saved Apple session on disk couldn't be refreshed automatically. The daemon is still running fine — you just need to log in again:
+
+```bash
+curl -X POST http://127.0.0.1/login \
+     -H 'content-type: application/json' \
+     -d '{"username":"you@example.com","password":"your-app-specific-password"}'
+```
+
+If your account uses two-factor authentication, you'll get a `202` back. Follow it with:
+
+```bash
+curl -X POST http://127.0.0.1/login/2fa \
+     -H 'content-type: application/json' \
+     -d '{"code":"123456"}'
+```
+
+### `ERROR: rootfs/system/bin/linker64 is missing`
+
+You skipped `stage-system.sh`. Run it before building:
+
+```bash
+bash tools/stage-system.sh --arch x86_64
+docker compose up --build -d
+```
+
+### `ERROR: rootfs/system/lib64/ has no .so files`
+
+You haven't extracted the Apple Music libraries yet. Run `extract-libs.sh` with your APK path:
+
+```bash
+bash tools/extract-libs.sh --bundle /path/to/apple-music.apk --arch x86_64
+docker compose up --build -d
+```
+
+### `playback_ready: false` in `/health` or `/me`
+
+The Apple native worker loaded but FPS isn't ready. Usually means the Apple Music libraries didn't initialize correctly — check `docker logs wrappr` for error lines from the `wrapper-v2` process. Most common cause is a library version mismatch (wrong APK build).
+
+### Saving your session across container rebuilds
+
+The `./data` directory in your clone is mounted into the container at
+`/app/rootfs/data/data/com.apple.android.music/files`. As long as that directory
+exists and you don't wipe it, your Apple session survives rebuilds and restarts.
+To back it up:
+
+```bash
+cp -r ./data ./data-backup
+```
+
+---
 
 ## License
 
