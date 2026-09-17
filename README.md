@@ -1,4 +1,5 @@
 # wrappr
+![Status](https://img.shields.io/badge/status-active-brightgreen)
 
 A fork of the Apple Music FPS (FairPlay Streaming) decryption wrapper, based on
 [`glomatico/wrapper-v2`](https://github.com/glomatico/wrapper-v2), which adds two HTTP endpoints — `/webplayback` and `/license`.
